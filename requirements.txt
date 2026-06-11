@@ -1,0 +1,50 @@
+# =========================================================
+# 四足机器狗 Agent 系统依赖
+# =========================================================
+
+# --- 语音核心 ---
+faster-whisper>=1.0.3
+silero-vad>=5.1.2
+openwakeword>=0.6.0
+sounddevice>=0.4.6
+soundfile>=0.12.1
+pyaudio>=0.2.14
+numpy>=1.26.0
+scipy>=1.13.0
+
+# --- TTS ---
+kokoro-onnx>=0.4.0
+edge-tts>=6.1.12
+elevenlabs>=1.7.0          # 云端备用
+
+# --- LLM & Agent ---
+langchain>=0.3.0
+langchain-openai>=0.2.0
+langchain-community>=0.3.0
+langgraph>=0.2.60
+openai>=1.55.0
+tiktoken>=0.8.0
+
+# --- ROS 2 (通过系统包安装，此处仅作记录) ---
+# ros-humble-rclpy  →  apt install ros-humble-rclpy
+# 若使用 mock 模式则无需 ROS 2
+
+# --- 配置管理 ---
+pyyaml>=6.0.2
+pydantic>=2.9.0
+pydantic-settings>=2.6.0
+python-dotenv>=1.0.1
+
+# --- 日志 & 监控 ---
+structlog>=24.4.0
+prometheus-client>=0.21.0
+
+# --- 测试 ---
+pytest>=8.3.0
+pytest-asyncio>=0.24.0
+pytest-cov>=5.0.0
+pytest-mock>=3.14.0
+
+# --- 工具 ---
+click>=8.1.7
+rich>=13.9.0

@@ -1,0 +1,60 @@
+version: "3.9"
+
+# =========================================================
+# 四足机器狗 Agent 系统 Docker Compose
+# =========================================================
+
+services:
+
+  # ----- 主应用 -----
+  robot_agent:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    image: robot_dog_agent:latest
+    container_name: robot_dog_agent
+    restart: unless-stopped
+    network_mode: host          # 与 ROS 2 DDS 共享网络
+    environment:
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - LOG_JSON=false
+      - ROS_DOMAIN_ID=${ROS_DOMAIN_ID:-0}
+    volumes:
+      - ../config:/app/config:ro
+      - ../logs:/app/logs
+      - model_cache:/root/.cache  # 缓存 Whisper/OpenWakeWord 模型
+    devices:
+      - /dev/snd:/dev/snd         # 音频设备
+    group_add:
+      - audio
+    command: ["python", "scripts/launch.py", "--mode", "full"]
+    depends_on:
+      - prometheus
+
+  # ----- Prometheus 监控 -----
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    restart: unless-stopped
+
+  # ----- Grafana 可视化 -----
+  grafana:
+    image: grafana/grafana:latest
+    container_name: grafana
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+    volumes:
+      - grafana_data:/var/lib/grafana
+    depends_on:
+      - prometheus
+    restart: unless-stopped
+
+volumes:
+  model_cache:
+  grafana_data:

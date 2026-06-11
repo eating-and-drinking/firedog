@@ -1,0 +1,114 @@
+# =========================================================
+# 四足机器狗 Agent 系统配置
+# config/config.yaml
+# =========================================================
+
+# ----- 语音配置 -----------------------------------------------
+voice:
+  wake_word:
+    model: "hey_robot"                  # OpenWakeWord 模型名称
+    threshold: 0.7                      # 唤醒置信度阈值
+    chunk_size: 1280                    # 音频帧大小 (80ms @ 16kHz)
+
+  vad:
+    model: "silero_vad"
+    threshold: 0.5                      # VAD 灵敏度
+    speech_pad_ms: 400                  # 语音前后填充 ms
+    min_speech_duration_ms: 250         # 最短语音片段
+    max_speech_duration_s: 30           # 最长单次录音
+
+  asr:
+    backend: "faster_whisper"           # faster_whisper | whisper | cloud
+    model_size: "medium"                # tiny / base / small / medium / large
+    language: "zh"
+    device: "cuda"                      # cuda | cpu
+    compute_type: "float16"
+    beam_size: 5
+    vad_filter: true
+
+  tts:
+    backend: "kokoro"                   # kokoro | elevenlabs | edge_tts
+    voice: "zh_female_1"
+    speed: 1.1
+    sample_rate: 22050
+    # ElevenLabs 云端备用
+    elevenlabs_voice_id: ""
+    elevenlabs_api_key: ""
+
+  audio:
+    input_device: null                  # null = 系统默认麦克风
+    output_device: null
+    sample_rate: 16000
+    channels: 1
+    chunk_ms: 80
+    # 回声消除
+    echo_cancellation: true
+    noise_reduction: true
+
+  timeouts:
+    barge_in_latency_ms: 200            # 打断响应上限
+    end_to_end_latency_ms: 2500         # 端到端响应上限
+    silence_timeout_s: 5.0             # 静音超时
+
+# ----- LLM 配置 -----------------------------------------------
+llm:
+  provider: "openai"                    # openai | qwen | ollama
+  model: "gpt-4o-mini"
+  api_key: "${OPENAI_API_KEY}"
+  base_url: ""                          # 空=官方 API, 或填本地代理
+  temperature: 0.2
+  max_tokens: 512
+  timeout_s: 10
+
+  # 本地 Qwen 备用
+  qwen:
+    model: "Qwen2.5-7B-Instruct"
+    base_url: "http://localhost:11434/v1"
+
+# ----- Agent 配置 ---------------------------------------------
+agent:
+  max_iterations: 10
+  memory_window: 20                     # 对话历史保留轮数
+  tool_timeout_s: 15                    # 单工具调用超时
+  planning_mode: "react"                # react | plan_and_execute
+
+# ----- 机器狗本体配置 ------------------------------------------
+robot:
+  # 通信方式: ros2 | sdk | mock
+  backend: "ros2"
+
+  ros2:
+    namespace: "/robot_dog"
+    cmd_vel_topic: "/cmd_vel"
+    odom_topic: "/odom"
+    imu_topic: "/imu/data"
+    joint_states_topic: "/joint_states"
+    battery_topic: "/battery_state"
+    action_server: "/motion_action"
+    qos_reliability: "reliable"
+
+  sdk:
+    host: "192.168.1.100"
+    port: 8080
+    timeout_s: 5
+
+  safety:
+    max_linear_velocity: 0.8            # m/s
+    max_angular_velocity: 1.5           # rad/s
+    battery_low_threshold: 15           # % 低电量预警
+    battery_critical_threshold: 5      # % 强制停止
+    joint_temp_max: 80                  # °C
+    emergency_stop_on_tilt: true        # 倾倒自动急停
+
+# ----- 日志 & 监控 -------------------------------------------
+logging:
+  level: "INFO"                         # DEBUG | INFO | WARNING | ERROR
+  file: "logs/robot_dog.log"
+  max_size_mb: 100
+  backup_count: 5
+  format: "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
+
+metrics:
+  enabled: true
+  export_port: 8000                     # Prometheus 指标端口
+  latency_histogram_buckets: [0.1, 0.25, 0.5, 1.0, 2.0, 3.0, 5.0]

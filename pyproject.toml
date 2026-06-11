@@ -1,0 +1,8 @@
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+markers = [
+    "integration: 集成测试（需要真实模型或硬件）",
+    "unit: 纯单元测试",
+]
+addopts = "-v --cov=src --cov-report=term-missing --cov-report=html"
