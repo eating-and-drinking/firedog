@@ -1,6 +1,6 @@
 # 机器狗 Agent 系统
 
-本项目由[eating-and-drinking](https://github.com/eating-and-drinking)在火狗智能公司开发，是四足机器狗智能体开发框架的第一版，覆盖双向语音交互、本体集成与自主任务执行。
+本项目由[eating-and-drinking](https://github.com/eating-and-drinking)在**火狗智能**开发，是四足机器狗智能体开发框架的第一版，覆盖双向语音交互、本体集成与自主任务执行。
 
 ## 系统架构
 
@@ -48,17 +48,17 @@ python scripts/launch.py --mode voice_only
 robot_dog_agent/
 ├── config/               # 配置文件
 ├── src/
-│   ├── voice/            # 考核项一：双向语音交互
+│   ├── voice/            # 双向语音交互
 │   │   ├── wake_word.py        # 唤醒词检测
 │   │   ├── vad.py              # 语音活动检测
 │   │   ├── asr.py              # 语音识别
 │   │   ├── tts.py              # 语音合成
 │   │   └── voice_pipeline.py  # 端到端语音管道
-│   ├── skills/           # 考核项二：技能层
+│   ├── skills/           # 技能层
 │   │   ├── motion_skills.py    # 运动控制技能
 │   │   ├── sensor_skills.py    # 传感器技能
 │   │   └── skill_registry.py  # 技能注册表
-│   ├── agent/            # 考核项三：Agent 架构
+│   ├── agent/            # Agent 架构
 │   │   ├── graph.py            # LangGraph 工作流
 │   │   ├── tools.py            # Tool 定义
 │   │   └── memory.py           # 记忆模块
