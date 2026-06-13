@@ -50,8 +50,8 @@ class VoicePipelineConfig:
     asr: ASRConfig = field(default_factory=ASRConfig)
     tts: TTSConfig = field(default_factory=TTSConfig)
     sample_rate: int = 16000
-    input_device: int | None = None
-    output_device: int | None = None
+    input_device: int | str | None = None   # int=索引, str="auto:关键字", None=默认
+    output_device: int | str | None = None
     silence_timeout_s: float = 5.0
     # 连续对话：说完后保持监听而不回到等待唤醒状态
     continuous_conversation: bool = True
@@ -81,9 +81,15 @@ class VoicePipeline:
         self._speech_q: queue.Queue[np.ndarray] = queue.Queue(maxsize=10)
 
         # 子模块
+        # Silero VAD 带流式内部状态：worker 与音频回调线程并发使用必须
+        # 各自独立实例，否则互相污染
         self._vad = SileroVAD(config.vad)
+        self._barge_vad = SileroVAD(config.vad)
         self._asr = ASREngine(config.asr)
-        self._tts = TTSEngine(config.tts)
+        # 将 output_device 传递给 TTS 配置
+        tts_cfg = config.tts
+        tts_cfg.output_device = config.output_device
+        self._tts = TTSEngine(tts_cfg)
         self._wake_detector = WakeWordDetector(
             config.wake_word,
             on_wake_cb=self._on_wake_detected,
@@ -97,9 +103,38 @@ class VoicePipeline:
     # 生命周期
     # ------------------------------------------------------------------
 
+    @staticmethod
+    def _resolve_device(spec: int | str | None, direction: str) -> int | None:
+        """解析设备配置：int→索引, 'auto:关键字'→自动检测, None→默认"""
+        if spec is None:
+            return None
+        if isinstance(spec, int):
+            return spec
+        spec_str = str(spec)
+        if spec_str.startswith("auto:"):
+            keyword = spec_str[5:].lower()
+            for i in range(len(sd.query_devices())):
+                info = sd.query_devices(i)
+                if keyword in info["name"].lower():
+                    log.info("device_auto_detected", direction=direction, index=i, name=info["name"])
+                    return i
+            log.warning("device_auto_not_found", direction=direction, keyword=keyword)
+            return None
+        try:
+            return int(spec_str)
+        except ValueError:
+            return None
+
     def start(self) -> None:
         """启动音频流与后台线程。"""
         self._running = True
+
+        # 解析设备
+        input_dev = self._resolve_device(self._cfg.input_device, "麦克风输入")
+        output_dev = self._resolve_device(self._cfg.output_device, "音箱输出")
+
+        # 将输出设备传递给 TTS
+        self._tts._cfg.output_device = output_dev
 
         # 后台：唤醒词检测
         self._wake_detector.start(self._wake_audio_q)
@@ -116,11 +151,11 @@ class VoicePipeline:
             channels=1,
             dtype="float32",
             blocksize=int(self._cfg.sample_rate * self._cfg.vad.chunk_ms / 1000),
-            device=self._cfg.input_device,
+            device=input_dev,
             callback=self._audio_callback,
         )
         self._stream.start()
-        log.info("voice_pipeline_started")
+        log.info("voice_pipeline_started", input_device=input_dev, output_device=output_dev)
 
     def stop(self) -> None:
         self._running = False
@@ -157,7 +192,7 @@ class VoicePipeline:
             state = self._state
 
         if state == PipelineState.SPEAKING:
-            prob = self._vad.is_speech(chunk)
+            prob = self._barge_vad.is_speech(chunk)
             if prob >= self._cfg.vad.threshold:
                 self._trigger_barge_in()
 
@@ -210,9 +245,13 @@ class VoicePipeline:
                 continue
 
             # 从队列中收集音频帧，直到 VAD 检测到完整语音片段
+            # 注意：每帧只做一次 VAD 推理（Silero 有流式状态，重复推理会污染），
+            # 静音计数用增量计数器而非回看历史帧
             audio_frames: list[np.ndarray] = []
             listen_start = time.monotonic()
             speech_detected = False
+            silent_streak = 0
+            self._vad.reset()
 
             while time.monotonic() - listen_start < self._cfg.silence_timeout_s:
                 try:
@@ -222,18 +261,18 @@ class VoicePipeline:
                         break
                     continue
 
+                if chunk is None:  # stop() 发出的退出哨兵
+                    return
+
                 audio_frames.append(chunk)
                 prob = self._vad.is_speech(chunk)
 
                 if prob >= self._cfg.vad.threshold:
                     speech_detected = True
-
-                # 检测到语音结束（连续静音）
-                if speech_detected:
-                    silent_streak = sum(
-                        1 for f in audio_frames[-8:]
-                        if self._vad.is_speech(f) < self._cfg.vad.threshold
-                    )
+                    silent_streak = 0
+                elif speech_detected:
+                    # 检测到语音结束（连续静音 ~480ms @80ms 帧）
+                    silent_streak += 1
                     if silent_streak >= 6:
                         break
 

@@ -1,12 +1,15 @@
 """
 src/voice/vad.py
 Silero VAD 封装：语音活动检测，端点检测
+
+注意：Silero VAD 是带内部 LSTM 状态的流式模型，使用时必须遵守两条纪律：
+  1. 同一实例只能按时间顺序喂帧，不能对同一帧重复推理（会污染内部状态）
+  2. 不同音频流（如唤醒检测与打断检测并发时）应使用独立实例
+在语音段边界（状态切换、丢弃积压音频后）调用 reset() 清空流式状态。
 """
 from __future__ import annotations
 
 import collections
-import queue
-import threading
 from dataclasses import dataclass
 from typing import Generator, Iterator
 
@@ -30,36 +33,35 @@ class VADConfig:
 
 class SileroVAD:
     """
-    Silero VAD 封装。
-    支持流式逐帧推理，线程安全。
+    Silero VAD 封装（每实例独立流式状态，模型很小，可放心多实例）。
+
+    is_speech() 内部维护残余样本缓冲：任意长度的 chunk 会被切成
+    512 样本（16kHz）/ 256 样本（8kHz）的完整帧逐帧推理，
+    不足一帧的尾部样本留到下一次调用拼接，不丢样本。
     """
 
-    _instance: "SileroVAD | None" = None
-    _lock = threading.Lock()
-
-    def __new__(cls, *args, **kwargs):
-        # 单例模式：模型只加载一次
-        with cls._lock:
-            if cls._instance is None:
-                instance = super().__new__(cls)
-                instance._initialized = False
-                cls._instance = instance
-        return cls._instance
-
     def __init__(self, config: VADConfig | None = None):
-        if self._initialized:
-            return
         self._cfg = config or VADConfig()
         log.info("vad_loading", model="silero_vad")
-        self._model, self._utils = torch.hub.load(
-            repo_or_dir="snakers4/silero-vad",
-            model="silero_vad",
-            force_reload=False,
-            onnx=False,
-        )
+        from silero_vad import load_silero_vad
+        self._model = load_silero_vad()
         self._model.eval()
-        self._initialized = True
+        self._frame = 512 if self._cfg.sample_rate == 16000 else 256
+        self._residual = np.empty(0, dtype=np.float32)
+        self._last_prob = 0.0
         log.info("vad_loaded")
+
+    # ------------------------------------------------------------------
+    # 流式状态管理
+    # ------------------------------------------------------------------
+
+    def reset(self) -> None:
+        """清空流式状态（模型 LSTM 状态 + 残余样本）。在语音段边界调用。"""
+        self._residual = np.empty(0, dtype=np.float32)
+        self._last_prob = 0.0
+        reset_fn = getattr(self._model, "reset_states", None)
+        if callable(reset_fn):
+            reset_fn()
 
     # ------------------------------------------------------------------
     # 核心推理
@@ -67,14 +69,26 @@ class SileroVAD:
 
     def is_speech(self, chunk: np.ndarray) -> float:
         """
-        判断 chunk 是否含语音。
-        chunk: float32, shape=(chunk_size,), 归一化到 [-1, 1]
-        返回语音概率 [0, 1]
+        输入按时间顺序到达的音频 chunk（float32, [-1,1]），返回语音概率 [0,1]。
+        chunk 长度任意；不足一帧时返回上一次的概率（样本已缓存，下次推理）。
+        多帧时返回各帧概率的最大值。
         """
-        tensor = torch.from_numpy(chunk).float()
+        buf = np.concatenate([self._residual, np.ascontiguousarray(chunk, dtype=np.float32)])
+        n_frames = len(buf) // self._frame
+        if n_frames == 0:
+            self._residual = buf
+            return self._last_prob
+
+        max_prob = 0.0
         with torch.no_grad():
-            prob = self._model(tensor, self._cfg.sample_rate).item()
-        return float(prob)
+            for i in range(n_frames):
+                sub = buf[i * self._frame:(i + 1) * self._frame]
+                p = float(self._model(torch.from_numpy(sub), self._cfg.sample_rate).item())
+                if p > max_prob:
+                    max_prob = p
+        self._residual = buf[n_frames * self._frame:]
+        self._last_prob = max_prob
+        return max_prob
 
     # ------------------------------------------------------------------
     # 流式语音片段生成器
@@ -88,8 +102,7 @@ class SileroVAD:
         实现了前后 padding 与最大时长保护。
         """
         cfg = self._cfg
-        chunk_samples = int(cfg.sample_rate * cfg.chunk_ms / 1000)
-        pad_chunks = int(cfg.speech_pad_ms / cfg.chunk_ms)
+        pad_chunks = max(1, int(cfg.speech_pad_ms / cfg.chunk_ms))
         min_chunks = int(cfg.min_speech_duration_ms / cfg.chunk_ms)
         max_chunks = int(cfg.max_speech_duration_s * 1000 / cfg.chunk_ms)
 
@@ -100,9 +113,6 @@ class SileroVAD:
         silence_trigger = pad_chunks
 
         for chunk in audio_stream:
-            if len(chunk) != chunk_samples:
-                chunk = np.resize(chunk, chunk_samples)
-
             prob = self.is_speech(chunk)
             is_speech = prob >= cfg.threshold
 

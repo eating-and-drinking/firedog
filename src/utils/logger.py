@@ -15,33 +15,56 @@ import structlog
 
 
 def setup_logging(level: str = "INFO", log_file: str | None = None) -> None:
-    """初始化全局日志配置（应在程序入口处调用一次）。"""
-    numeric_level = getattr(logging, level.upper(), logging.INFO)
+    """
+    初始化全局日志配置（应在程序入口处调用一次）。
 
-    handlers: list[logging.Handler] = [logging.StreamHandler(sys.stdout)]
+    structlog 事件必须经由 stdlib logging 分发（LoggerFactory + ProcessorFormatter），
+    否则只会 print 到终端、永远进不了日志文件——排障时最需要的
+    asr_result/barge_in/声纹分数等事件全部丢失（曾经的真实事故）。
+    """
+    numeric_level = getattr(logging, level.upper(), logging.INFO)
+    use_json = os.environ.get("LOG_JSON", "false").lower() == "true"
+
+    # 第三方库的 stdlib 日志也会经过这条链，补上时间戳/级别
+    foreign_pre_chain = [
+        structlog.stdlib.add_log_level,
+        structlog.processors.TimeStamper(fmt="iso"),
+    ]
+
+    console_handler = logging.StreamHandler(sys.stdout)
+    console_handler.setFormatter(
+        structlog.stdlib.ProcessorFormatter(
+            processor=structlog.dev.ConsoleRenderer(colors=sys.stdout.isatty()),
+            foreign_pre_chain=foreign_pre_chain,
+        )
+    )
+    handlers: list[logging.Handler] = [console_handler]
 
     if log_file:
         Path(log_file).parent.mkdir(parents=True, exist_ok=True)
-        handlers.append(
-            logging.handlers.RotatingFileHandler(
-                log_file,
-                maxBytes=100 * 1024 * 1024,
-                backupCount=5,
-                encoding="utf-8",
+        file_handler = logging.handlers.RotatingFileHandler(
+            log_file,
+            maxBytes=100 * 1024 * 1024,
+            backupCount=5,
+            encoding="utf-8",
+        )
+        file_handler.setFormatter(
+            structlog.stdlib.ProcessorFormatter(
+                processor=structlog.processors.JSONRenderer()
+                if use_json
+                else structlog.dev.ConsoleRenderer(colors=False),
+                foreign_pre_chain=foreign_pre_chain,
             )
         )
+        handlers.append(file_handler)
 
-    logging.basicConfig(
-        level=numeric_level,
-        handlers=handlers,
-        format="%(message)s",
-    )
+    root = logging.getLogger()
+    root.handlers = handlers
+    root.setLevel(numeric_level)
 
     # 屏蔽第三方库过多日志
-    for noisy in ("httpx", "httpcore", "openai", "faster_whisper"):
+    for noisy in ("httpx", "httpcore", "openai", "funasr"):
         logging.getLogger(noisy).setLevel(logging.WARNING)
-
-    use_json = os.environ.get("LOG_JSON", "false").lower() == "true"
 
     structlog.configure(
         processors=[
@@ -50,13 +73,11 @@ def setup_logging(level: str = "INFO", log_file: str | None = None) -> None:
             structlog.processors.TimeStamper(fmt="iso"),
             structlog.processors.StackInfoRenderer(),
             structlog.processors.format_exc_info,
-            structlog.processors.JSONRenderer()
-            if use_json
-            else structlog.dev.ConsoleRenderer(colors=sys.stdout.isatty()),
+            structlog.stdlib.ProcessorFormatter.wrap_for_formatter,
         ],
         wrapper_class=structlog.make_filtering_bound_logger(numeric_level),
         context_class=dict,
-        logger_factory=structlog.PrintLoggerFactory(),
+        logger_factory=structlog.stdlib.LoggerFactory(),
         cache_logger_on_first_use=True,
     )
 

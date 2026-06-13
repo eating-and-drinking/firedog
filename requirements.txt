@@ -3,19 +3,50 @@
 # =========================================================
 
 # --- 语音核心 ---
-faster-whisper>=1.0.3
+funasr>=1.1.0
 silero-vad>=5.1.2
 openwakeword>=0.6.0
+pypinyin>=0.50.0              # 唤醒词拼音模糊匹配（容忍 ASR 近音错字）
+sherpa-onnx>=1.12.40,<1.13     # 中文唤醒词 KWS；1.13.x 需 onnxruntime 1.24 与本项目冲突
+sherpa-onnx-core>=1.12.40,<1.13  # sherpa-onnx wheel 漏声明的运行库依赖
+pyrnnoise>=0.3.0              # RNNoise 流式降噪（CPU 实时）
+resemblyzer>=0.1.3               # 声纹验证 d-vector（降级时用 torchaudio MFCC）
 sounddevice>=0.4.6
 soundfile>=0.12.1
 pyaudio>=0.2.14
 numpy>=1.26.0
 scipy>=1.13.0
 
-# --- TTS ---
+# --- TTS (CosyVoice3 推理) ---
+# CosyVoice3 仓库：git clone --recursive https://github.com/FunAudioLLM/CosyVoice.git
+# ⚠️ 不要 pip install -r CosyVoice/requirements.txt（那是训练用的，含 deepspeed/lightning/gradio/tensorboard 等）
+# 以下仅是推理所需的最小依赖：
+torch>=2.1.0,<2.9             # ≥2.9 升 CUDA13 与 onnxruntime-gpu 冲突，且 torchaudio.load 需 torchcodec
+torchaudio>=2.1.0,<2.9
+onnxruntime-gpu>=1.17.0       # speech_tokenizer + campplus ONNX 推理
+transformers>=4.51.0,<4.52    # Qwen2ForCausalLM (CosyVoice3 LLM 骨干)；5.x 不兼容，必须钉 4.51.x
+accelerate>=1.0.0             # transformers device_map=auto 必需
+HyperPyYAML>=1.2.0            # 加载 cosyvoice3.yaml 模型配置
+omegaconf>=2.3.0              # DictConfig 配置
+einops>=0.7.0                 # 张量操作 (pack, rearrange, repeat)
+x-transformers>=1.0           # RotaryEmbedding (CosyVoice3 DiT)
+conformer>=0.3.0              # ConformerBlock (Matcha-TTS decoder 依赖)
+diffusers>=0.25.0             # 激活函数/注意力 (Matcha-TTS 内部依赖)
+openai-whisper>=20231117      # log_mel_spectrogram 特征提取
+modelscope>=1.10.0            # 模型下载（本地已有可跳过）
+wetext>=0.1.0                 # CosyVoice 文本归一化（无 ttsfrd 时的兜底）
+lightning>=2.0.0              # Matcha-TTS (CosyVoice flow decoder) 推理路径依赖
+gdown>=5.0.0                  # Matcha-TTS utils 模块级依赖
+wget>=3.2                     # 同上
+matplotlib>=3.8.0             # 同上
+pyarrow>=15.0.0               # cosyvoice.dataset.processor 依赖
+pyworld>=0.3.4                # 同上（F0 提取）
+inflect>=7.0.0                # 英文数字拼写
+tiktoken>=0.8.0               # BPE tokenizer
+# Kokoro 备用
 kokoro-onnx>=0.4.0
 edge-tts>=6.1.12
-elevenlabs>=1.7.0          # 云端备用
+elevenlabs>=1.7.0             # 云端备用
 
 # --- LLM & Agent ---
 langchain>=0.3.0

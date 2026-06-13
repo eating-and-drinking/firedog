@@ -1,3 +1,97 @@
+[project]
+name = "firedog"
+version = "0.1.0"
+description = "四足机器狗 Agent 系统"
+requires-python = ">=3.11"
+dependencies = [
+    # --- 语音核心 ---
+    "funasr>=1.1.0",
+    "silero-vad>=5.1.2",
+    "openwakeword>=0.6.0",
+    # 流式降噪前端（RNNoise，Pipecat 等生产语音框架同款）
+    "pyrnnoise>=0.3.0",
+    # pyrnnoise→audiolab 需要 av.option（PyAV 15 起移除），钉 14.x
+    "av>=12,<14.3",
+    # ASR 兜底唤醒的拼音模糊匹配（SenseVoice 常把"机器狗"转成"一气狗"等近音词）
+    "pypinyin>=0.50.0",
+    # sherpa-onnx KWS：中文唤醒词主路（运行时自定义关键词，无需训练）
+    "sherpa-onnx>=1.12.40,<1.13",  # 1.13.x 需外部 onnxruntime==1.24 与本项目 1.26 冲突
+    # sherpa-onnx wheel 元数据漏声明 core（带运行库），必须显式列出
+    "sherpa-onnx-core>=1.12.40,<1.13",
+    "resemblyzer>=0.1.3",
+    "sounddevice>=0.4.6",
+    "soundfile>=0.12.1",
+    "pyaudio>=0.2.14",
+    "numpy>=1.26.0",
+    "scipy>=1.13.0",
+    # --- TTS (CosyVoice3 推理) ---
+    # torchaudio ≥2.9 的 load() 强制依赖 torchcodec、torch ≥2.9 切到 CUDA13 运行库
+    # 与 onnxruntime-gpu (CUDA12) 冲突，钉在 2.8.x
+    "torch>=2.1.0,<2.9",
+    "torchaudio>=2.1.0,<2.9",
+    "onnxruntime-gpu>=1.17.0",
+    # CosyVoice3 的 Qwen2 骨干与 transformers 5.x 不兼容，必须钉在 4.51.x
+    "transformers>=4.51.0,<4.52",
+    "accelerate>=1.0.0",
+    "HyperPyYAML>=1.2.0",
+    "omegaconf>=2.3.0",
+    "einops>=0.7.0",
+    "x-transformers>=1.0",
+    "conformer>=0.3.0",
+    "diffusers>=0.25.0",
+    "openai-whisper>=20231117",
+    "modelscope>=1.10.0",
+    "inflect>=7.0.0",
+    "wetext>=0.1.0",
+    # Matcha-TTS（CosyVoice flow decoder）的 matcha.utils 在推理路径上
+    # 模块级 import 这些训练期工具，缺一个都会让 TTS 加载失败
+    "lightning>=2.0.0",
+    "gdown>=5.0.0",
+    "wget>=3.2",
+    "matplotlib>=3.8.0",
+    # cosyvoice3.yaml 模型配置引用 cosyvoice.dataset.processor → pyarrow/pyworld
+    "pyarrow>=15.0.0",
+    "pyworld>=0.3.4",
+    # tiktoken 已在 LLM 依赖中
+    # --- TTS 备用 ---
+    "kokoro-onnx>=0.4.0",
+    "edge-tts>=6.1.12",
+    "elevenlabs>=1.7.0",
+    # --- LLM & Agent ---
+    "langchain>=0.3.0",
+    "langchain-openai>=0.2.0",
+    "langchain-community>=0.3.0",
+    "langgraph>=0.2.60",
+    "openai>=1.55.0",
+    "tiktoken>=0.8.0",
+    # --- 配置管理 ---
+    "pyyaml>=6.0.2",
+    "pydantic>=2.9.0",
+    "pydantic-settings>=2.6.0",
+    "python-dotenv>=1.0.1",
+    # --- 日志 & 监控 ---
+    "structlog>=24.4.0",
+    "prometheus-client>=0.21.0",
+    # --- 工具 ---
+    "click>=8.1.7",
+    "rich>=13.9.0",
+]
+
+[project.optional-dependencies]
+test = [
+    "pytest>=8.3.0",
+    "pytest-asyncio>=0.24.0",
+    "pytest-cov>=5.0.0",
+    "pytest-mock>=3.14.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/agent", "src/integration", "src/skills", "src/utils", "src/voice"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"

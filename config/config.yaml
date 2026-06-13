@@ -6,64 +6,122 @@
 # ----- 语音配置 -----------------------------------------------
 voice:
   wake_word:
-    model: "hey_robot"                  # OpenWakeWord 模型名称
-    threshold: 0.7                      # 唤醒置信度阈值
+    model: "hey_jarvis"                 # OpenWakeWord 模型名 / .onnx 路径；不存在则自动降级为 ASR 关键词
+    threshold: 0.5                      # OWW 唤醒置信度阈值
     chunk_size: 1280                    # 音频帧大小 (80ms @ 16kHz)
+    keywords:                           # 先精确子串匹配，再拼音模糊匹配（要求 ≥2 字防误唤醒）
+      - "机器狗"                          # 模糊匹配可命中 "一气狗"/"一起狗"/"激情狗" 等 ASR 近音错字
+      - "小Q"                            # 覆盖 "你好小狗"、"嘿小狗" 等说法
+      - "你好小Q"
+    fuzzy_pinyin: true                  # 拼音模糊匹配：每音节编辑距离 ≤1 即命中
+                                        # 误唤醒变多时可关掉或减少 keywords
+    # sherpa-onnx KWS（中文唤醒主路，流式 ~80ms 级延迟；模型目录不存在时自动降级 ASR 兜底）
+    sherpa_model_dir: "./sherpa-onnx-kws-zipformer-wenetspeech-3.3M-2024-01-01"
+    sherpa_threshold: 0.25              # 越低越灵敏（误唤醒也越多），典型 0.1~0.5
+    hybrid: true                        # KWS 与 ASR 兜底并行：谁先命中谁唤醒。
+                                        # KWS 在本机声学链路上有漏检，先混合跑保召回；
+                                        # 待 [唤醒] 日志确认 sherpa 命中率后再考虑关掉省 GPU
+
+  speaker_id:
+    enabled: true                       # 声纹验证总开关
+    similarity_threshold: 0.8           # 打断所需的最低声纹相似度 [0,1]
+                                        # 实测：本人打断 0.83+，TTS 残余回声 ~0.75；
+                                        # ⚠️ 设 0.9 会超过本人分数，谁都打不断
+    enroll_min_s: 1.0                   # 注册用音频的最短时长（秒）
 
   vad:
     model: "silero_vad"
-    threshold: 0.5                      # VAD 灵敏度
+    threshold: 0.5                      # VAD 灵敏度。⚠️ 不要设 0.9：正常语速的字只有
+                                        # 0.5~0.8，0.9 等于关掉端点检测（说话没反应）。
+                                        # 防误触发靠 min_speech_duration_ms 累计门槛
     speech_pad_ms: 400                  # 语音前后填充 ms
-    min_speech_duration_ms: 250         # 最短语音片段
+    min_speech_duration_ms: 250         # 最短语音片段：连续有声 ~240ms 才确认"开始说话"，
+                                        # 孤立尖峰（咔哒/咳嗽）不触发
     max_speech_duration_s: 30           # 最长单次录音
 
   asr:
-    backend: "faster_whisper"           # faster_whisper | whisper | cloud
-    model_size: "medium"                # tiny / base / small / medium / large
-    language: "zh"
+    backend: "sensevoice"               # sensevoice
+    model_id: "./SenseVoiceSmall"       # 本地模型路径
+    language: "zh"                      # auto / zh / en / ja / ko / yue
     device: "cuda"                      # cuda | cpu
-    compute_type: "float16"
-    beam_size: 5
-    vad_filter: true
+    use_itn: true                       # 逆文本归一化
 
   tts:
-    backend: "kokoro"                   # kokoro | elevenlabs | edge_tts
-    voice: "zh_female_1"
-    speed: 1.1
-    sample_rate: 22050
+    backend: "cosyvoice"                # cosyvoice | kokoro | elevenlabs | edge_tts
+    # CosyVoice3 本地模型
+    model_dir: "./Fun-CosyVoice3-0.5B-2512"
+    prompt_speech: "./CosyVoice/asset/zero_shot_prompt.wav"  # 零样本克隆参考音频（24kHz）
+    prompt_text: "希望你以后能够做的比我还好哟。"            # 参考音频的文字内容（必须与音频一致）
+    instruct: ""                        # 指令控制，如 "请用开心的语气说。" / "请用广东话表达。"
+    speed: 1.0
+    sample_rate: 24000
+    # Kokoro 本地备用
+    kokoro_voice: "zh_female_1"
     # ElevenLabs 云端备用
     elevenlabs_voice_id: ""
     elevenlabs_api_key: ""
 
   audio:
-    input_device: null                  # null = 系统默认麦克风
-    output_device: null
+    # 自动检测：程序启动时会按关键字搜索设备索引
+    # ListenGo 6-Mic 阵列 (card 3) → 麦克风输入
+    # USB Audio Device / C-Media (card 2) → 音箱输出
+    # AEC 已启用（scripts/setup_aec.sh）：必须走系统默认源 echocancel_source。
+    # 改回 "auto:ListenGo" 会绕过 PulseAudio 直连 ALSA，AEC 即失效！
+    input_device: null                  # auto:关键字 → 自动匹配设备，null=系统默认
+    output_device: null                  # null=系统默认(PulseAudio)，自动做采样率转换
     sample_rate: 16000
     channels: 1
     chunk_ms: 80
-    # 回声消除
-    echo_cancellation: true
-    noise_reduction: true
+    mic_gain: 1.0                      # ⚠️ AEC 模块已开数字 AGC，增益交给它；
+                                        # mic_gain 必须保持 1.0——曾因 AGC×50 叠加导致
+                                        # 环境音全被识别的事故。若关闭 AEC/AGC 改回 50
+    watchdog_timeout_s: 3.0            # 麦克风静默超时自动重连（USB 掉线恢复）
+    # 回声消除由 PulseAudio 完成：运行 scripts/setup_aec.sh 启用
+
+  # 流式降噪（RNNoise，CPU 实时 2.3ms/80ms chunk；在 mic_gain 之后、VAD/ASR 之前）
+  # 默认关闭：实测本栈的 Silero VAD 与 SenseVoice 自身已抗噪（0dB 白噪/电机噪声下
+  # VAD 0% 误触发、ASR 全对），而 RNNoise 伪影反而让 ASR 出错字。
+  # 仅在强广播噪声环境（户外风噪/人群）导致待机 VAD 持续误触发时再开启。
+  denoise:
+    enabled: false
+    backend: "rnnoise"                  # rnnoise | none
 
   timeouts:
     barge_in_latency_ms: 200            # 打断响应上限
     end_to_end_latency_ms: 2500         # 端到端响应上限
     silence_timeout_s: 5.0             # 静音超时
+    post_tts_cooldown_ms: 200           # TTS 播完后冷却时间（防回声触发）
+                                        # 已启用 AEC；若关闭 AEC 需调回 800
+
+  # 端点检测（原代码中的硬编码值，集中到配置）
+  endpoint:
+    idle_silence_chunks: 10             # 待机：连续静音帧数判定语音结束（~800ms @80ms）
+    listen_silence_chunks: 8            # 对话：连续静音帧数判定说完（~640ms）
+    max_utterance_s: 16                 # 单句最长录音时长，超过强制断句
+
+  # 连续对话：回答完后保持聆听 silence_timeout_s，可直接追问；超时回待机
+  conversation:
+    continuous: true
+
+  # 打断（barge-in）
+  barge_in:
+    threshold: 0.5                      # 打断 VAD 阈值。实测 AEC 残余回声均值 0.06、
+                                        # 偶发尖峰 0.84：尖峰只触发声纹验证，由声纹兜底。
+                                        # 若关闭 AEC 需调回 0.7
+    verify_interval_s: 0.5              # 声纹验证失败后的重试冷却（去抖）
+    verify_audio_s: 0.8                 # 起音后积累多久的纯用户语音再验证声纹
+                                        # 越长越准但打断响应越慢（总响应 ≈ 此值 + 0.15s）
+    keep_audio: true                    # 打断后把触发打断的语音作为下一句开头续接识别，免重说
 
 # ----- LLM 配置 -----------------------------------------------
 llm:
-  provider: "openai"                    # openai | qwen | ollama
-  model: "gpt-4o-mini"
-  api_key: "${OPENAI_API_KEY}"
-  base_url: ""                          # 空=官方 API, 或填本地代理
-  temperature: 0.2
+  provider: "local"                     # local（transformers 直接加载）
+  model: "./Qwen2.5-3B-Instruct"        # 本地模型路径
+  api_key: ""
+  base_url: ""
+  temperature: 0.7
   max_tokens: 512
-  timeout_s: 10
-
-  # 本地 Qwen 备用
-  qwen:
-    model: "Qwen2.5-7B-Instruct"
-    base_url: "http://localhost:11434/v1"
+  timeout_s: 60
 
 # ----- Agent 配置 ---------------------------------------------
 agent:

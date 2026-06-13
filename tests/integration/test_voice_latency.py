@@ -19,13 +19,13 @@ from src.voice.tts import TTSEngine, TTSConfig
 
 @pytest.mark.integration
 class TestASRLatency:
-    """ASR 单独时延测试（mock faster_whisper）"""
+    """ASR 单独时延测试（mock funasr）"""
 
     def test_empty_audio_returns_fast(self):
         """空音频应快速返回空字符串，不阻塞"""
-        config = ASRConfig(device="cpu", model_size="tiny")
-        with patch("faster_whisper.WhisperModel") as mock_model:
-            mock_model.return_value.transcribe.return_value = ([], MagicMock(language="zh", language_probability=0.9, duration=0.5))
+        config = ASRConfig(device="cpu")
+        with patch("funasr.AutoModel") as mock_auto:
+            mock_auto.return_value.generate.return_value = [{"text": ""}]
             engine = ASREngine(config)
             short_audio = np.zeros(100, dtype=np.float32)
             start = time.perf_counter()
@@ -36,15 +36,12 @@ class TestASRLatency:
 
     def test_transcribe_latency_within_budget(self):
         """模拟 2s 音频，transcribe 时延应在预算内"""
-        config = ASRConfig(device="cpu", model_size="tiny")
-        fake_segment = MagicMock()
-        fake_segment.text = "向前走两步"
-        fake_info = MagicMock(language="zh", language_probability=0.95, duration=2.0)
+        config = ASRConfig(device="cpu")
 
-        with patch("faster_whisper.WhisperModel") as mock_model:
+        with patch("funasr.AutoModel") as mock_auto:
             mock_instance = MagicMock()
-            mock_instance.transcribe.return_value = ([fake_segment], fake_info)
-            mock_model.return_value = mock_instance
+            mock_instance.generate.return_value = [{"text": "向前走两步"}]
+            mock_auto.return_value = mock_instance
             engine = ASREngine(config)
 
             # 2s @ 16kHz

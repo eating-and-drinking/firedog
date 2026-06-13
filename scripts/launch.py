@@ -153,15 +153,23 @@ def _run_voice(cfg: dict, agent, voice_only: bool = False) -> None:
             speech_pad_ms=v.get("vad", {}).get("speech_pad_ms", 400),
         ),
         asr=ASRConfig(
-            model_size=v.get("asr", {}).get("model_size", "medium"),
+            model_id=v.get("asr", {}).get("model_id", "iic/SenseVoice-Small"),
             language=v.get("asr", {}).get("language", "zh"),
             device=v.get("asr", {}).get("device", "cpu"),
+            use_itn=v.get("asr", {}).get("use_itn", True),
         ),
         tts=TTSConfig(
-            backend=v.get("tts", {}).get("backend", "edge_tts"),
-            voice=v.get("tts", {}).get("voice", "zh_female_1"),
+            backend=v.get("tts", {}).get("backend", "cosyvoice"),
+            model_dir=v.get("tts", {}).get("model_dir", "./Fun-CosyVoice3-0.5B-2512"),
+            prompt_speech=v.get("tts", {}).get("prompt_speech", ""),
+            instruct=v.get("tts", {}).get("instruct", ""),
+            speed=v.get("tts", {}).get("speed", 1.0),
+            sample_rate=v.get("tts", {}).get("sample_rate", 24000),
+            kokoro_voice=v.get("tts", {}).get("kokoro_voice", "zh_female_1"),
         ),
         sample_rate=v.get("audio", {}).get("sample_rate", 16000),
+        input_device=v.get("audio", {}).get("input_device", None),
+        output_device=v.get("audio", {}).get("output_device", None),
         silence_timeout_s=v.get("timeouts", {}).get("silence_timeout_s", 5.0),
     )
 

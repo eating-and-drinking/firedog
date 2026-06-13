@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+.python-version
+
+# 本地大模型与第三方仓库（按 README/requirements 说明单独下载）
+SenseVoiceSmall/
+Qwen2.5-3B-Instruct/
+Fun-CosyVoice3-0.5B-2512/
+CosyVoice/
+*.onnx
+*.gguf
+
+# 运行产物
+logs/
+tmp/
+htmlcov/
+.coverage
+.pytest_cache/
+
+# IDE / 工具
+.marscode/
+.idea/
+.vscode/
+sherpa-onnx-kws-zipformer-wenetspeech-3.3M-2024-01-01/

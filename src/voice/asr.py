@@ -1,12 +1,12 @@
 """
 src/voice/asr.py
-FasterWhisper 语音识别封装
+SenseVoice-Small 语音识别封装（基于 FunASR）
 验收指标：常用指令字准率 ≥ 90%
 """
 from __future__ import annotations
 
+import re
 import threading
-import time
 from dataclasses import dataclass
 
 import numpy as np
@@ -19,19 +19,17 @@ log = get_logger(__name__)
 
 @dataclass
 class ASRConfig:
-    backend: str = "faster_whisper"
-    model_size: str = "medium"
-    language: str = "zh"
-    device: str = "cuda"
-    compute_type: str = "float16"
-    beam_size: int = 5
-    vad_filter: bool = True
+    backend: str = "sensevoice"
+    model_id: str = "iic/SenseVoice-Small"
+    language: str = "zh"            # auto / zh / en / ja / ko / yue
+    use_itn: bool = True            # 逆文本归一化（数字转文字等）
+    device: str = "cuda"            # cuda / cpu
     sample_rate: int = 16000
 
 
 class ASREngine:
     """
-    语音识别引擎，默认使用 FasterWhisper（本地）。
+    语音识别引擎，使用 SenseVoice-Small（FunASR）。
     线程安全（内置锁，避免并发加载模型）。
     """
 
@@ -42,24 +40,30 @@ class ASREngine:
         self._load_model()
 
     def _load_model(self) -> None:
-        if self._cfg.backend == "faster_whisper":
-            self._load_faster_whisper()
+        if self._cfg.backend == "sensevoice":
+            self._load_sensevoice()
         else:
             raise ValueError(f"Unsupported ASR backend: {self._cfg.backend}")
 
-    def _load_faster_whisper(self) -> None:
-        from faster_whisper import WhisperModel
+    def _load_sensevoice(self) -> None:
+        from pathlib import Path
+        from funasr import AutoModel
+
+        model_id = self._cfg.model_id
+        # 相对路径解析为绝对路径，避免 FunASR 把它当远程模型 ID 处理
+        if model_id.startswith("./") or model_id.startswith("../"):
+            model_id = str(Path(model_id).resolve())
 
         log.info(
             "asr_loading",
-            backend="faster_whisper",
-            model=self._cfg.model_size,
+            backend="sensevoice",
+            model=model_id,
             device=self._cfg.device,
         )
-        self._model = WhisperModel(
-            self._cfg.model_size,
+        self._model = AutoModel(
+            model=model_id,
             device=self._cfg.device,
-            compute_type=self._cfg.compute_type,
+            disable_update=True,
         )
         log.info("asr_loaded")
 
@@ -91,21 +95,24 @@ class ASREngine:
                     return ""
 
     def _transcribe_impl(self, audio: np.ndarray) -> str:
-        segments, info = self._model.transcribe(
-            audio,
+        result = self._model.generate(
+            input=audio.astype(np.float32),
             language=self._cfg.language,
-            beam_size=self._cfg.beam_size,
-            vad_filter=self._cfg.vad_filter,
-            vad_parameters=dict(
-                min_silence_duration_ms=500,
-                speech_pad_ms=400,
-            ),
+            use_itn=self._cfg.use_itn,
         )
-        text = "".join(seg.text for seg in segments).strip()
+
+        # result 是 list，每个元素是 dict，key "text" 存识别结果
+        if result and isinstance(result, list):
+            text = result[0].get("text", "") if isinstance(result[0], dict) else str(result[0])
+        else:
+            text = ""
+
+        # 去除 SenseVoice 输出的特殊标签，如 <|zh|><|NEUTRAL|><|Speech|><|withitn|>
+        text = re.sub(r"<\|[^|>]+\|>", "", text)
+
         log.debug(
             "asr_detail",
-            language=info.language,
-            language_prob=round(info.language_probability, 3),
-            duration=round(info.duration, 2),
+            language=self._cfg.language,
+            raw_result=str(result)[:200] if result else "",
         )
-        return text
+        return text.strip()
